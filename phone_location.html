@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Phone GPS Location</title>
+</head>
+<body>
+    <h2>Phone GPS Location</h2>
+    <p id="location">Getting location...</p>
+
+    <script>
+        navigator.geolocation.watchPosition(
+            function(position) {
+                let lat = position.coords.latitude;
+                let lon = position.coords.longitude;
+
+                document.getElementById("location").innerHTML =
+                    "Latitude: " + lat +
+                    "<br>Longitude: " + lon;
+            },
+            function(error) {
+                document.getElementById("location").innerHTML =
+                    "Location error: " + error.message;
+            },
+            {
+                enableHighAccuracy: true
+            }
+        );
+    </script>
+</body>
+</html>
