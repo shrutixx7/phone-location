@@ -1,30 +1,143 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Phone GPS Location</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Phone GPS for SmartPothole</title>
+    <style>
+        body {
+            max-width: 36rem;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            color: #172b3a;
+            font: 1rem/1.5 system-ui, sans-serif;
+        }
+        label { display: block; margin-top: 1rem; font-weight: 650; }
+        input {
+            box-sizing: border-box;
+            width: 100%;
+            margin-top: 0.35rem;
+            padding: 0.7rem;
+        }
+        button { margin-top: 1rem; padding: 0.7rem 1rem; }
+        #location, #status { padding: 0.8rem; background: #f1f6f5; }
+        #location { white-space: pre-line; }
+    </style>
 </head>
 <body>
-    <h2>Phone GPS Location</h2>
-    <p id="location">Getting location...</p>
+    <h1>Phone GPS</h1>
+    <p>Connect this phone's location to your running SmartPothole dashboard.</p>
+    <ol>
+        <li>Open Live AI Detection in the dashboard.</li>
+        <li>Expose its local GPS receiver through an HTTPS tunnel.</li>
+        <li>Enter the tunnel URL and the temporary pairing token shown in the dashboard.</li>
+    </ol>
+
+    <form id="connection">
+        <label for="receiver">HTTPS receiver URL</label>
+        <input id="receiver" type="url" inputmode="url"
+               placeholder="https://your-tunnel.example" required>
+        <label for="token">Temporary pairing token</label>
+        <input id="token" type="password" autocomplete="off" required>
+        <button type="submit">Start sharing location</button>
+        <button id="stop" type="button" hidden>Stop sharing</button>
+    </form>
+    <p id="location" aria-live="polite">Latitude: waiting<br>Longitude: waiting</p>
+    <p id="status" aria-live="polite">Location is not being shared.</p>
 
     <script>
-        navigator.geolocation.watchPosition(
-            function(position) {
-                let lat = position.coords.latitude;
-                let lon = position.coords.longitude;
+        const form = document.getElementById("connection");
+        const receiverInput = document.getElementById("receiver");
+        const tokenInput = document.getElementById("token");
+        const locationOutput = document.getElementById("location");
+        const statusOutput = document.getElementById("status");
+        const stopButton = document.getElementById("stop");
+        let watchId = null;
+        let receiverUrl = "";
+        let pairingToken = "";
+        let lastSentAt = 0;
 
-                document.getElementById("location").innerHTML =
-                    "Latitude: " + lat +
-                    "<br>Longitude: " + lon;
-            },
-            function(error) {
-                document.getElementById("location").innerHTML =
-                    "Location error: " + error.message;
-            },
-            {
-                enableHighAccuracy: true
+        async function sendPosition(position) {
+            const { latitude, longitude, accuracy } = position.coords;
+            locationOutput.textContent =
+                "Latitude: " + latitude.toFixed(6) +
+                "\nLongitude: " + longitude.toFixed(6);
+
+            if (Date.now() - lastSentAt < 3000) return;
+            lastSentAt = Date.now();
+            statusOutput.textContent = "Sending the latest GPS fix...";
+            try {
+                const response = await fetch(receiverUrl + "/api/gps", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": "Bearer " + pairingToken,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        latitude,
+                        longitude,
+                        accuracy,
+                        timestamp: position.timestamp
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error("Receiver returned HTTP " + response.status);
+                }
+                statusOutput.textContent =
+                    "GPS fix sent to SmartPothole at " + new Date().toLocaleTimeString();
+            } catch (error) {
+                statusOutput.textContent =
+                    "Could not send GPS. Check the HTTPS tunnel, receiver origin, and pairing token.";
+                console.error("GPS receiver request failed:", error);
             }
-        );
+        }
+
+        function stopSharing() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            pairingToken = "";
+            tokenInput.value = "";
+            stopButton.hidden = true;
+            statusOutput.textContent = "Location sharing stopped.";
+        }
+
+        form.addEventListener("submit", function(event) {
+            event.preventDefault();
+            if (!navigator.geolocation) {
+                statusOutput.textContent = "This browser does not support geolocation.";
+                return;
+            }
+            let receiver;
+            try {
+                receiver = new URL(receiverInput.value.trim());
+            } catch {
+                statusOutput.textContent = "Enter a valid HTTPS tunnel URL.";
+                return;
+            }
+            if (receiver.protocol !== "https:") {
+                statusOutput.textContent = "The receiver URL must use HTTPS.";
+                return;
+            }
+
+            if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+            receiverUrl = receiver.href.replace(/\/+$/, "");
+            pairingToken = tokenInput.value.trim();
+            lastSentAt = 0;
+            stopButton.hidden = false;
+            statusOutput.textContent = "Requesting phone location permission...";
+            watchId = navigator.geolocation.watchPosition(
+                sendPosition,
+                function(error) {
+                    statusOutput.textContent = "Location error: " + error.message;
+                },
+                { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+            );
+        });
+
+        stopButton.addEventListener("click", stopSharing);
     </script>
 </body>
 </html>
+
